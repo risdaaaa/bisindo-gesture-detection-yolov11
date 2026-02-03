@@ -1,37 +1,36 @@
 import streamlit as st
-import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 from ultralytics import YOLO
-import tempfile
 import time
 
-# =========================
+# =====================================================
 # PAGE CONFIG
-# =========================
+# =====================================================
 st.set_page_config(
     page_title="BISINDO Gesture Detection",
     page_icon="🤟",
     layout="wide"
 )
 
-# =========================
+# =====================================================
 # LOAD MODEL
-# =========================
+# =====================================================
 @st.cache_resource
 def load_model():
-    return YOLO("best.pt")
+    return YOLO("best.pt")  # pastikan file model ada di repo
 
 model = load_model()
 
-# =========================
+# =====================================================
 # HEADER
-# =========================
+# =====================================================
 st.markdown(
     """
-    <h1 style='text-align: center;'>🤟 BISINDO Gesture Detection</h1>
-    <p style='text-align: center; font-size:18px;'>
-    Deteksi Bahasa Isyarat Indonesia menggunakan <b>YOLOv11</b>
+    <h1 style="text-align:center;">🤟 BISINDO Gesture Detection</h1>
+    <p style="text-align:center; font-size:18px;">
+    Deteksi Bahasa Isyarat Indonesia menggunakan <b>YOLOv11</b><br>
+    Input: <b>Foto (Image Upload)</b>
     </p>
     """,
     unsafe_allow_html=True
@@ -39,126 +38,124 @@ st.markdown(
 
 st.divider()
 
-# =========================
+# =====================================================
 # SIDEBAR
-# =========================
-st.sidebar.header("⚙️ Pengaturan Model")
+# =====================================================
+st.sidebar.header("⚙️ Pengaturan Deteksi")
 
 conf_thres = st.sidebar.slider(
     "Confidence Threshold",
-    min_value=0.1,
-    max_value=1.0,
-    value=0.4,
-    step=0.05
+    0.1, 1.0, 0.4, 0.05
 )
 
 iou_thres = st.sidebar.slider(
     "IoU Threshold",
-    min_value=0.1,
-    max_value=1.0,
-    value=0.5,
-    step=0.05
-)
-
-source_option = st.sidebar.radio(
-    "📥 Pilih Input",
-    ["Upload Gambar", "Webcam"]
+    0.1, 1.0, 0.5, 0.05
 )
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(
     """
-    **Model:** YOLOv11l  
-    **Task:** Object Detection  
-    **Dataset:** BISINDO v16  
+    **Model**: YOLOv11l  
+    **Dataset**: BISINDO v16  
+    **Mode**: Image Upload Only  
+    **Platform**: Streamlit Cloud
     """
 )
 
-# =========================
-# IMAGE UPLOAD
-# =========================
-if source_option == "Upload Gambar":
-    st.subheader("📸 Upload Gambar")
+# =====================================================
+# MAIN CONTENT
+# =====================================================
+st.subheader("📸 Upload Foto Gesture BISINDO")
 
-    uploaded_file = st.file_uploader(
-        "Upload gambar (JPG / PNG)",
-        type=["jpg", "jpeg", "png"]
-    )
+uploaded_file = st.file_uploader(
+    "Upload gambar (.jpg / .png)",
+    type=["jpg", "jpeg", "png"]
+)
 
-    if uploaded_file:
-        image = Image.open(uploaded_file).convert("RGB")
-        img_array = np.array(image)
+if uploaded_file:
+    image = Image.open(uploaded_file).convert("RGB")
+    img_np = np.array(image)
 
-        col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-        with col1:
-            st.image(image, caption="Gambar Input", use_column_width=True)
+    # =====================
+    # ORIGINAL IMAGE
+    # =====================
+    with col1:
+        st.image(
+            image,
+            caption="🖼️ Gambar Asli",
+            use_column_width=True
+        )
 
-        with col2:
-            with st.spinner("🔍 Mendeteksi gesture..."):
-                results = model.predict(
-                    source=img_array,
-                    conf=conf_thres,
-                    iou=iou_thres,
-                    verbose=False
-                )
+    # =====================
+    # DETECTION
+    # =====================
+    with col2:
+        with st.spinner("🔍 Mendeteksi gesture..."):
+            start_time = time.time()
 
-                annotated = results[0].plot()
-                st.image(annotated, caption="Hasil Deteksi", use_column_width=True)
+            results = model.predict(
+                source=img_np,
+                conf=conf_thres,
+                iou=iou_thres,
+                verbose=False
+            )
 
-            # Show detected classes
+            inference_time = time.time() - start_time
+
+            draw = ImageDraw.Draw(image)
             boxes = results[0].boxes
-            if boxes is not None and len(boxes) > 0:
-                st.success(f"✅ Terdeteksi {len(boxes)} gesture")
-                for cls in boxes.cls:
-                    st.write(f"- {model.names[int(cls)]}")
+            detected_labels = []
+
+            if boxes is not None:
+                for box, cls, conf in zip(
+                    boxes.xyxy,
+                    boxes.cls,
+                    boxes.conf
+                ):
+                    x1, y1, x2, y2 = map(int, box.tolist())
+                    label = model.names[int(cls)]
+                    detected_labels.append(label)
+
+                    draw.rectangle(
+                        [(x1, y1), (x2, y2)],
+                        outline="lime",
+                        width=3
+                    )
+                    draw.text(
+                        (x1, y1 - 12),
+                        f"{label} {conf:.2f}",
+                        fill="lime"
+                    )
+
+            st.image(
+                image,
+                caption=f"✅ Hasil Deteksi (Inference {inference_time:.2f} detik)",
+                use_column_width=True
+            )
+
+            if detected_labels:
+                st.success(f"🎯 Terdeteksi {len(detected_labels)} gesture")
+                st.markdown("### 🧠 Gesture Terdeteksi:")
+                for lbl in sorted(set(detected_labels)):
+                    st.markdown(f"- **{lbl}**")
             else:
                 st.warning("⚠️ Tidak ada gesture terdeteksi")
 
-# =========================
-# WEBCAM
-# =========================
-elif source_option == "Webcam":
-    st.subheader("🎥 Real-time Webcam Detection")
+else:
+    st.info("⬆️ Silakan upload foto gesture BISINDO untuk memulai deteksi.")
 
-    run = st.checkbox("▶️ Start Webcam")
-
-    FRAME_WINDOW = st.image([])
-
-    if run:
-        cap = cv2.VideoCapture(0)
-
-        if not cap.isOpened():
-            st.error("❌ Webcam tidak dapat diakses")
-        else:
-            while run:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                results = model.predict(
-                    source=frame_rgb,
-                    conf=conf_thres,
-                    iou=iou_thres,
-                    verbose=False
-                )
-
-                annotated_frame = results[0].plot()
-                FRAME_WINDOW.image(annotated_frame)
-
-            cap.release()
-
-# =========================
+# =====================================================
 # FOOTER
-# =========================
+# =====================================================
 st.divider()
 st.markdown(
     """
-    <p style='text-align:center; font-size:14px;'>
-    🚀 Developed for BISINDO Gesture Recognition<br>
-    YOLOv11 · Streamlit · Computer Vision
+    <p style="text-align:center; font-size:14px;">
+    YOLOv11 · BISINDO Gesture Detection<br>
+    Streamlit Cloud Deployment
     </p>
     """,
     unsafe_allow_html=True
